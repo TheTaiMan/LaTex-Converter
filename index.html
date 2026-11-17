@@ -79,41 +79,40 @@
           return result
         }
 
-        // Function to replace inline math (original)
+        // Accept both \( ... \) and \\( ... \\).
         function replaceInlineMath(text) {
-          return text.replace(/\\\((.*?)\\\)/g, (match, p1) => `$${p1.trim()}$`)
-        }
-
-        // Function to replace display math (original)
-        function replaceDisplayMath(text) {
-          return text.replace(/\\\[(.*?)\\\]/gs, (match, p1) => {
-            let inner = p1
-              .split('\n')
-              .map((line) => line.trim())
-              .join(' ')
-              .trim()
-            return `$$${inner}$$`
+          return text.replace(/(\\{1,2})\(([^\r\n]*?)\1\)/g, (_, slash, math) => {
+            return `$${math.trim()}$`
           })
         }
 
-        // Function to replace all math
-        function replaceMath(text) {
-          // First replace alternative display math
-          let replacedText = replaceAltDisplayMath(text)
-          // Then replace original display math
-          replacedText = replaceDisplayMath(replacedText)
-          // Then replace alternative inline math
-          replacedText = replaceAltInlineMath(replacedText)
-          // Then replace original inline math
-          replacedText = replaceInlineMath(replacedText)
-          return replacedText
+      // Accept both \[ ... \] and \\[ ... \\].
+      function replaceDisplayMath(text) {
+        return text.replace(/(\\{1,2})\[([\s\S]*?)\1\]/g, (_, slash, math) => {
+          return `$$\n${math.trim()}\n$$`
+        })
+      }
+
+      function replaceMath(text) {
+        // Split around fenced code blocks and inline code, keeping them in the output.
+        const codePattern = /(^[ \t]{0,3}(`{3,}|~{3,})[^\r\n]*\r?\n[\s\S]*?(?:^[ \t]{0,3}\2[ \t]*(?=\r?$)|(?![\s\S]))|(`+)(?!`)[^\r\n]*?\3(?!`))/gm
+        let result = ''
+        let start = 0
+
+        function convertProse(prose) {
+          prose = replaceAltDisplayMath(prose)
+          prose = replaceDisplayMath(prose)
+          prose = replaceAltInlineMath(prose)
+          return replaceInlineMath(prose)
         }
 
-        // Process the text
-        let convertedText = replaceMath(inputText)
+        for (const match of text.matchAll(codePattern)) {
+          result += convertProse(text.slice(start, match.index))
+          result += match[0]
+          start = match.index + match[0].length
+        }
 
-        // Display the converted text in the output div
-        document.getElementById('output').innerText = convertedText
+        return result + convertProse(text.slice(start))
       }
 
       function copyToClipboard() {
