@@ -1,130 +1,94 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
   <head>
+    <meta charset="UTF-8" />
     <title>LaTeX to Markdown Converter</title>
+    <link rel="icon" href="data:," />
     <script>
+      function replaceAltDisplayMath(text) {
+        return text.replace(
+          /^[ \t]*\[[ \t]*\r?\n([\s\S]*?)^[ \t]*\][ \t]*(?=\r?$)/gm,
+          (_, math) => `$$\n${math.trim()}\n$$`
+        )
+      }
 
-      function convertLatexToMarkdown() {
-        // Get the text from the text area
-        let inputText = document.getElementById('inputText').value
+      function replaceAltInlineMath(text) {
+        let result = ''
+        let start = 0
+        let open = text.indexOf('( ')
 
-        // Replace alternative display math: standalone [ ... ] blocks
-        function replaceAltDisplayMath(text) {
-          // Match [ on its own line, then content, then ] on its own line
-          return text.replace(/^[ \t]*\[\s*\n([\s\S]*?)^[ \t]*\][ \t]*$/gm, (match, p1) => {
-            let inner = p1
-              .split('\n')
-              .map((line) => line.trim())
-              .join(' ')
-              .trim()
-            return `$$${inner}$$`
-          })
-        }
+        while (open !== -1) {
+          result += text.slice(start, open)
 
-        // Replace alternative inline math: ( ... ) with spaces inside
-        function replaceAltInlineMath(text) {
-          // Use a more careful approach that handles nested parentheses
-          let result = ''
-          let i = 0
-          
-          while (i < text.length) {
-            // Look for "( " (open paren followed by space)
-            if (i < text.length - 1 && text[i] === '(' && text[i + 1] === ' ') {
-              let start = i
-              i += 2 // skip "( "
-              let depth = 1
-              let content = ''
-              
-              // Scan forward, tracking parenthesis depth
-              while (i < text.length && depth > 0) {
-                if (text[i] === '(') {
-                  depth++
-                  content += text[i]
-                  i++
-                } else if (text[i] === ')') {
-                  depth--
-                  if (depth === 0) {
-                    // Check if there's a space before this closing paren
-                    if (content.endsWith(' ')) {
-                      content = content.slice(0, -1) // remove trailing space
-                      result += `$${content}$`
-                      i++ // skip the closing )
-                      break
-                    } else {
-                      // No space before ), so this isn't a math delimiter
-                      result += text.substring(start, i + 1)
-                      i++
-                      break
-                    }
-                  } else {
-                    content += text[i]
-                    i++
-                  }
-                } else {
-                  content += text[i]
-                  i++
-                }
-              }
-              
-              // If we didn't find a matching close, output the original
-              if (depth > 0) {
-                result += text.substring(start, i)
-              }
-            } else {
-              result += text[i]
-              i++
-            }
+          let depth = 1
+          let end = open + 2
+          while (end < text.length && depth > 0) {
+            if (text[end] === '(') depth++
+            if (text[end] === ')') depth--
+            end++
           }
-          
-          return result
+
+          if (depth === 0 && text[end - 2] === ' ') {
+            const math = text.slice(open + 2, end - 1).trim()
+            result += math ? `$${math}$` : text.slice(open, end)
+          } else {
+            result += text.slice(open, end)
+          }
+
+          start = end
+          open = text.indexOf('( ', start)
         }
 
-        // Accept both \( ... \) and \\( ... \\).
-        function replaceInlineMath(text) {
-          return text.replace(/(\\{1,2})\(([^\r\n]*?)\1\)/g, (_, slash, math) => {
-            return `$${math.trim()}$`
-          })
-        }
-
-      // Accept both \[ ... \] and \\[ ... \\].
-      function replaceDisplayMath(text) {
-        return text.replace(/(\\{1,2})\[([\s\S]*?)\1\]/g, (_, slash, math) => {
-          return `$$\n${math.trim()}\n$$`
-        })
+        return result + text.slice(start)
       }
 
       function replaceMath(text) {
-        // Split around fenced code blocks and inline code, keeping them in the output.
-        const codePattern = /(^[ \t]{0,3}(`{3,}|~{3,})[^\r\n]*\r?\n[\s\S]*?(?:^[ \t]{0,3}\2[ \t]*(?=\r?$)|(?![\s\S]))|(`+)(?!`)[^\r\n]*?\3(?!`))/gm
+        // Match fenced code blocks, inline code, and explicit LaTeX delimiters.
+        const pattern =
+          /^[ \t]{0,3}(`{3,}|~{3,})[^\r\n]*\r?\n[\s\S]*?(?:^[ \t]{0,3}\1[`~]*[ \t]*(?=\r?$)|(?![\s\S]))|(?<!`)(`+)(?!`)[\s\S]*?(?<!`)\2(?!`)|(\\{1,2})\(([^\r\n]*?)\3\)|(\\{1,2})\[([\s\S]*?)\5\]/gm
+
         let result = ''
         let start = 0
 
-        function convertProse(prose) {
-          prose = replaceAltDisplayMath(prose)
-          prose = replaceDisplayMath(prose)
-          prose = replaceAltInlineMath(prose)
-          return replaceInlineMath(prose)
+        function convertAlternativeMath(prose) {
+          return replaceAltInlineMath(
+            replaceAltDisplayMath(prose)
+          )
         }
 
-        for (const match of text.matchAll(codePattern)) {
-          result += convertProse(text.slice(start, match.index))
-          result += match[0]
+        for (const match of text.matchAll(pattern)) {
+          result += convertAlternativeMath(text.slice(start, match.index))
+
+          const [, fence, inlineCode, , inlineMath, , displayMath] = match
+          if (fence || inlineCode) {
+            result += match[0]
+          } else if (inlineMath !== undefined) {
+            result += `$${inlineMath.trim()}$`
+          } else {
+            result += `$$\n${displayMath.trim()}\n$$`
+          }
+
           start = match.index + match[0].length
         }
 
-        return result + convertProse(text.slice(start))
+        return result + convertAlternativeMath(text.slice(start))
       }
 
-      function copyToClipboard() {
-        let outputText = document.getElementById('output').innerText
-        navigator.clipboard.writeText(outputText)
+      function convertLatexToMarkdown() {
+        const inputText = document.getElementById('inputText').value
+        document.getElementById('output').textContent = replaceMath(inputText)
+      }
+
+      async function copyToClipboard() {
+        const outputText = document.getElementById('output').textContent
+        await navigator.clipboard.writeText(outputText)
       }
     </script>
   </head>
   <body>
     <h1>LaTeX to Markdown Converter</h1>
     <textarea id="inputText" rows="15" cols="80"></textarea><br />
-    <button onclick="convertLatexToMarkdown()">Convert</button>
+    <button type="button" onclick="convertLatexToMarkdown()">Convert</button>
     <pre
       id="output"
       style="
@@ -135,6 +99,6 @@
         border: 1px solid #ccc;
       "
     ></pre>
-    <button onclick="copyToClipboard()">Copy Output</button>
+    <button type="button" onclick="copyToClipboard()">Copy Output</button>
   </body>
 </html>
